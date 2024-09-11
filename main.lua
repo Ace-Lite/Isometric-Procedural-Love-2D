@@ -83,7 +83,7 @@ local function check_surronding_tiles(tile_x, tile_y, tile_z, snow_seed)
             sl_flags = SLOPE_FRONT
         
             if tiley_offp[tile_x-1] ~= nil and tiley_offp[tile_x-1].height < tile_z then
-                sl_flags = SLOPE_FTONRLEFT
+                sl_flags = SLOPE_FRONTLEFT
                 if tiley_offp[tile_x+1] ~= nil and tiley_offp[tile_x+1].height < tile_z then
                     sl_flags = SLOPE_CORNERRIGHT
                 end
