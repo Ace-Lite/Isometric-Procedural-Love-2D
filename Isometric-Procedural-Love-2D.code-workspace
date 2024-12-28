@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"lövelauncher.path": "D:\\Git-Projects\\SimCityCopyCat\\love.exe",
+		"lövelauncher.useConsoleSubsystem": true
+	}
+}
