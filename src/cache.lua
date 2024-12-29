@@ -13,7 +13,7 @@
 ---@field create function
 ---@field storage table<slope_data>
 
-local module_data = {
+local cache = {
     storage = {},
 }
 
@@ -81,9 +81,6 @@ local shader = love.graphics.newShader([[
         }
 #endif
 ]])
-
-
-
 
 local meshes = {}
 
@@ -266,7 +263,7 @@ meshes[10] = createModel{
 }
 
 -- Use when all data were pre-cached
-function module_data:destroyMeshes()
+function cache:destroyMeshes()
     for i = 0, 10 do
         meshes[i]:release()
         meshes[i] = nil -- might seem silly, but garbage collector.. uhh, not letting this one to it, I think...
@@ -281,7 +278,7 @@ end
 ---Creates based on texture bunch of tiles
 ---@param texture string
 ---@return table<any>
-function module_data:generate(texture)
+function cache:generate(texture)
     if self.storage and self.storage[texture] then
         return self.storage[texture].renders
     end
@@ -314,4 +311,4 @@ function module_data:generate(texture)
     return ref.renders
 end
 
-return module_data
+return cache
