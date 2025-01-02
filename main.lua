@@ -1,6 +1,23 @@
 local gen = require 'src/generate'
 local def = require 'src/gendefs'
 
+--[[
+
+    TODO: SEPARATE WORLD INTO CHUNKS
+    TODO: STORE TILES AS 3D GAME
+    TODO: STORE ENTITIES AS IT'S OWN THING
+    TODO: BETTER BIOME PATTERNS
+    TODO: SPRITE X WORLD Z ORDERING
+    TODO: SCREENSPACE VS DRAWING WHOLE WORLD
+    TODO: FINITELY INFINITE WORLD
+    TODO: DEPTH MAP
+    TODO: INV. CHUNK UPDATES
+    TODO: BASIC GAMEPLAY (THIS WON'T BE A GAME, HOWEVER SOME INTEREST NEEDS TO BE HERE)
+    TODO: USE DEPTH MAP FOR BASIC LIGHTING SYSTEM
+
+--]]
+
+
 -- "GAME" SETTINGS
 
 Debug_Mode = true
@@ -13,7 +30,7 @@ scope = 1.00
 x = 0.00
 y = 0.00
 
-world = {} ---@type map
+world = {} ---@type flatmap
 
 render = nil
 

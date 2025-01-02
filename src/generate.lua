@@ -5,7 +5,7 @@
 
 --]]
 
----@class map
+---@class flatmap
 ---@field width number
 ---@field height number
 ---@field seed number
@@ -13,23 +13,50 @@
 ---@field heightmap table<table<tile>>
 ---@field biomemap  table<table<number>>
 ---@field levelsmap table<table<number>>
+---@field entities  table<table<table<entity>>>
 
 ---@class generator
 ---@field new function
 ---@field render function
 ---@field spliceRender function
 
+---@class chunk
+---@field map                   table<table<table>>
+---@field depthmap              table
+---@field update                function
+---@field image                 any
+
+---@class entity_sprite
+---@field sprite    any
+---@field offset_x  number
+---@field offset_y  number
+
+---@class entity
+---@field offset_x  number
+---@field offset_y  number
+---@field sprite    entity_sprite
+---@field z         number
+
 ---@class tile
----@field type number
----@field height number
----@field pillar number
----@field depth number
----@field slope number
+---@field type                  number
+---@field height                number
+---@field pillar                number
+---@field depth                 number
+---@field slope                 number
+
+---@class vegetation
+---@field z_min         number
+---@field z_max         number
+---@field chance        number
+---@field distribution  number
+---@field sprite        any
 
 ---@class biome
----@field levels table<any>
----@field mountains table<any>
----@field height_multiplier number
+---@field levels                table<any>
+---@field mountains             table<any>
+---@field vegetation            table<vegetation>
+---@field height_multiplier     number
+---@field pillars               boolean
 
 local generator = {} ---@type generator
 
@@ -49,6 +76,10 @@ local SLOPE_BACKLEFT = bit.bor(SLOPE_BACK, SLOPE_LEFT)
 local SLOPE_BACKRIGHT = bit.bor(SLOPE_BACK, SLOPE_RIGHT)
 local SLOPE_CORNERLEFT = 256
 local SLOPE_CORNERRIGHT = 512
+
+local graphics = love.graphics
+
+local draw = graphics.draw
 
 ---calculates depth of the tile
 ---@param tile_x number
@@ -119,7 +150,7 @@ end
 ---@param width             number
 ---@param height            number
 ---@param biomedef          table<biome>    biome data
----@return map
+---@return flatmap
 function generator:new(seed, width, height, biomedef)
     
     -- defaulting up-values
@@ -131,7 +162,7 @@ function generator:new(seed, width, height, biomedef)
     
     -- setup
 
-    local map = { ---@type map
+    local map = { ---@type flatmap
         seed = seed,
 
         width = width,
@@ -142,12 +173,14 @@ function generator:new(seed, width, height, biomedef)
         -- maps
         heightmap = {},
         biomemap = {},
-        levelsmap = {}
+        levelsmap = {},
+        entities = {}
     }
     
     local heightmap = map.heightmap
     local levelsmap = map.levelsmap
     local biomemap = map.biomemap
+    local entitymap = map.entities
 
     -- generating various maps
 
@@ -159,6 +192,8 @@ function generator:new(seed, width, height, biomedef)
         levelsmap[y] = {}
 
         biomemap[y] = {}
+
+        entitymap[y] = {}     
 
         for x = -height, height do
 
@@ -199,7 +234,7 @@ function generator:new(seed, width, height, biomedef)
 
             tile.height = tile.height + math.max(hills * (225 + hill_randomness + mountain_randomness) - 120, 0)
             
-            tile.pillar = tile.height > 8 and 0 or math.max(math.random(-512, 4), 0) -- random pillars
+            tile.pillar = biomedef[biome].pillars == true and (tile.height > 8 and 0 or math.max(math.random(-512, 4), 0)) or 0 -- random pillars
             tile.depth = calculateDepth(x, y, tile.height)
             
             -- levels map sampling
@@ -210,6 +245,35 @@ function generator:new(seed, width, height, biomedef)
             )
 
             levelsmap[y][x] = math.abs(math.floor(levels_sample * -8))
+
+            if tile.pillar == 0 and biomedef[biome].vegetation then
+                local vegs = biomedef[biome].vegetation
+
+                for vg = 1, #vegs do
+                    local veg = biomedef[biome].vegetation[vg]
+
+                    if tile.height > veg.z_min and tile.height < veg.z_max then
+
+                        local entity_spawns = math.ceil(love.math.noise(
+                            seed + x / veg.distribution,
+                            seed + y / veg.distribution
+                        ) * 500)/500
+
+                        if entity_spawns < veg.chance then
+                            if entitymap[y][x] == nil then
+                                entitymap[y][x] = {}
+                            end
+
+                            table.insert(entitymap[y][x], 
+                            {
+                                sprite = veg.sprite,
+                                offset_x = math.random(-16, 16),
+                                offset_y = math.random(-16, 16)
+                            })
+                        end
+                    end
+                end
+            end
         end
     end
 
@@ -230,23 +294,29 @@ function generator:new(seed, width, height, biomedef)
 end
 
 ---renders splices of the level for better composition
----@param map               map
+---@param map               flatmap
 ---@param biomedef          table<biome>    biome data
 ---@param default_block     any             graphic for default block
 ---@param default_tile      any             graphic for default tile
+---@param camera_x          number
+---@param camera_y          number
+---@param screen_scale      number
+---@param screen_width      number
+---@param screen_height     number
 ---@return table<any>
-function generator:draw(map, biomedef, default_block, default_tile)
-    local map_img = love.graphics.newCanvas(
-            MAP_BLOCK * map.width,
-            MAP_BLOCK_HALF * map.height
+function generator:draw(map, biomedef, default_block, default_tile, camera_x, camera_y, screen_scale, screen_width, screen_height)
+    local screen = love.graphics.newCanvas(
+        map.width * MAP_BLOCK,
+        map.height * MAP_BLOCK_HALF
     )
 
-    love.graphics.setCanvas(map_img)
+    graphics.setCanvas(screen)
 
 
     local height_map = map.heightmap
     local levels_map = map.levelsmap
     local biome_map  = map.biomemap
+    local entit_map  = map.entities
 
     local height = map.height
     local width = map.width
@@ -256,55 +326,23 @@ function generator:draw(map, biomedef, default_block, default_tile)
         local height_row = height_map[y]
         local level_row  = levels_map[y]
         local biome_row  = biome_map[y]
+        local entit_row  = entit_map[y]
 
-        for x = -width, width do
-            local height_tile   = height_row[x] ---@type tile
-            local level_tile    = level_row[x]  ---@type number
-            local biome_tile    = biomedef[math.max(math.min(biome_row[x], #biomedef), 1)]
-            local levels        = biome_tile.levels
-            local size          = height_tile.height + height_tile.pillar
+        if height_row then
+            for x = -width, width do
+                local height_tile   = height_row[x] ---@type tile
+                local level_tile    = level_row[x]  ---@type number
+                local biome_tile    = biomedef[math.max(math.min(biome_row[x], #biomedef), 1)]
+                local levels        = biome_tile.levels
+                local size          = height_tile.height + height_tile.pillar
 
-            local mountain_threshold = math.random(7, 10)
+                local mountain_threshold = math.random(7, 10)
 
-            if mountain_threshold < size then
-                for z = 0, size do
-                    local level = math.random(28, 32) < size 
-                    and biome_tile.mountains[1]
-                    or biome_tile.mountains[#biome_tile.mountains > 1 and math.random(2, #biome_tile.mountains) or 1] 
-                    local offset = 0
-                    local img = level
-                    
-                    if type(level) == "table" then
-                        if level[0] ~= nil then
-                            if z > size - 1 and level[height_tile.slope] ~= nil then
-                                level = level[height_tile.slope]
-                            else
-                                level = level[0]
-                            end
-                        end
-
-                        img = level.img
-                        offset = level.offset or 0
-                    end
-
-                    love.graphics.draw(
-                        img or default_block, 
-                        (x - y) * MAP_BLOCK_HALF,
-                        (x + y) * MAP_TILE_HALF - z * MAP_BLOCK_HALF + offset
-                    )
-                end
-            elseif size > 0 then
-                if height_tile.pillar > 0 then
+                if mountain_threshold < size then
                     for z = 0, size do
-                        love.graphics.draw(
-                            default_block,
-                            (x - y) * MAP_BLOCK_HALF,
-                            (x + y) * MAP_TILE_HALF - z * MAP_BLOCK_HALF
-                        )
-                    end
-                else
-                    for z = 0, size do
-                        local level = levels[math.max(math.min(math.floor(((size - z) * #levels / level_tile) or 1), #levels), 1)]
+                        local level = math.random(28, 32) < size 
+                        and biome_tile.mountains[1]
+                        or biome_tile.mountains[#biome_tile.mountains > 1 and math.random(2, #biome_tile.mountains) or 1] 
                         local offset = 0
                         local img = level
                         
@@ -321,29 +359,80 @@ function generator:draw(map, biomedef, default_block, default_tile)
                             offset = level.offset or 0
                         end
 
-                        love.graphics.draw(
+                        draw(
                             img or default_block, 
                             (x - y) * MAP_BLOCK_HALF,
                             (x + y) * MAP_TILE_HALF - z * MAP_BLOCK_HALF + offset
                         )
                     end
+                elseif size > 0 then
+                    if height_tile.pillar > 0 then
+                        for z = 0, size do
+                            draw(
+                                default_block,
+                                (x - y) * MAP_BLOCK_HALF,
+                                (x + y) * MAP_TILE_HALF - z * MAP_BLOCK_HALF
+                            )
+                        end
+                    else
+                        for z = 0, size do
+                            local level = levels[math.max(math.min(math.floor(((size - z) * #levels / level_tile) or 1), #levels), 1)]
+                            local offset = 0
+                            local img = level
+                            
+                            if type(level) == "table" then
+                                if level[0] ~= nil then
+                                    if z > size - 1 and level[height_tile.slope] ~= nil then
+                                        level = level[height_tile.slope]
+                                    else
+                                        level = level[0]
+                                    end
+                                end
+
+                                img = level.img
+                                offset = level.offset or 0
+                            end
+
+                            draw(
+                                img or default_block, 
+                                (x - y) * MAP_BLOCK_HALF,
+                                (x + y) * MAP_TILE_HALF - z * MAP_BLOCK_HALF + offset
+                            )
+                        end
+                    end
+                else
+                    draw(
+                        default_tile, 
+                        (x - y) * MAP_BLOCK_HALF,
+                        (x + y) * MAP_TILE_HALF
+                    )
                 end
-            else
-                love.graphics.draw(
-                    default_tile, 
-                    (x - y) * MAP_BLOCK_HALF,
-                    (x + y) * MAP_TILE_HALF
-                )
+
+                if entit_row ~= nil then
+                    local entities      = entit_row[x]
+
+                    if entities then
+                        for i = 1, #entities do
+                            local entity = entities[i] ---@cast entity entity
+                            
+                            draw(
+                                entity.sprite.sprite, 
+                                (x - y) * MAP_BLOCK_HALF + entity.sprite.offset_x + entity.offset_x,
+                                (x + y) * MAP_TILE_HALF + entity.sprite.offset_y + entity.offset_y
+                            )
+                        end
+                    end
+                end
             end
         end
     end
 
     love.graphics.setCanvas()    
-    return map_img
+    return screen
 end
 
 ---compresses renders into one image
----@param map               map
+---@param map               flatmap
 ---@param biomedef          table<biome>    biome data
 ---@param default_block     any             graphic for default block
 ---@param default_tile      any             graphic for default tile
